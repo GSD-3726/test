@@ -106,10 +106,21 @@ def get_time_string(date):
 def get_date_time_string(date):
     return get_date_string(date) + get_time_string(date)
 
+def get_with_retry(url, headers=None, retries=3, timeout=10):
+    """带重试的请求函数"""
+    for i in range(retries):
+        try:
+            resp = requests.get(url, headers=headers, timeout=timeout)
+            return resp
+        except Exception as e:
+            if i == retries - 1:
+                raise e
+            time.sleep(2 ** i)  # 指数退避
+
 # API调用函数
 def cate_list():
     try:
-        resp = requests.get("https://program-sc.miguvideo.com/live/v2/tv-data/a5f78af9d160418eb679a6dd0429c920")
+        resp = get_with_retry("https://program-sc.miguvideo.com/live/v2/tv-data/a5f78af9d160418eb679a6dd0429c920")
         live_list = resp.json()["body"]["liveList"]
         # 过滤热门分类
         live_list = [item for item in live_list if item["name"] != "热门"]
@@ -124,7 +135,8 @@ def data_list():
     try:
         cates = cate_list()
         for i, cate in enumerate(cates):
-            resp = requests.get(f"https://program-sc.miguvideo.com/live/v2/tv-data/{cate['vomsID']}")
+            print(f"获取分类 {cate['name']} 的数据...")
+            resp = get_with_retry(f"https://program-sc.miguvideo.com/live/v2/tv-data/{cate['vomsID']}")
             cates[i]["dataList"] = resp.json()["body"]["dataList"]
         
         # 去重处理
@@ -159,7 +171,7 @@ def data_list():
 def get_url_info(cont_id):
     try:
         url = f"https://webapi.miguvideo.com/gateway/playurl/v2/play/playurlh5?contId={cont_id}&rateType=999&clientId=-&startPlay=true&xh265=false&channelId=0131_200300220100002"
-        resp = requests.get(url)
+        resp = get_with_retry(url)
         data = resp.json()
         if "body" in data and "urlInfo" in data["body"] and "url" in data["body"]["urlInfo"]:
             return data["body"]["urlInfo"]["url"]
@@ -169,7 +181,24 @@ def get_url_info(cont_id):
         return ""
 
 def get_android_url_720p(pid):
+    """获取Android 720p播放链接，增强错误处理"""
     try:
+        # 检查pid有效性
+        if pid is None:
+            print("错误: PID为None")
+            return {"url": "", "rateType": 0}
+        
+        if not isinstance(pid, str) and not isinstance(pid, int):
+            print(f"错误: PID类型无效 {type(pid)}")
+            return {"url": "", "rateType": 0}
+        
+        pid_str = str(pid).strip()
+        if not pid_str:
+            print("错误: PID为空字符串")
+            return {"url": "", "rateType": 0}
+        
+        print(f"正在处理PID: {pid_str}")
+        
         timestamp = int(time.time() * 1000)
         app_version = "26000009"
         headers = {
@@ -178,36 +207,41 @@ def get_android_url_720p(pid):
             "X-UP-CLIENT-CHANNEL-ID": "2600000900-99000-201600010010027"
         }
         
-        str_to_hash = f"{timestamp}{pid}{app_version}"
+        str_to_hash = f"{timestamp}{pid_str}{app_version}"
         md5 = get_string_md5(str_to_hash)
         salt = 66666601
         suffix = "770fafdf5ba04d279a59ef1600baae98migu6666"
         sign = get_string_md5(md5 + suffix)
         
         # 广东卫视特殊处理
-        rate_type = 2 if pid == "608831231" else 3
+        rate_type = 2 if pid_str == "608831231" else 3
         
         base_url = "https://play.miguvideo.com/playurl/v1/play/playurl"
-        params = f"?sign={sign}&rateType={rate_type}&contId={pid}&timestamp={timestamp}&salt={salt}"
+        params = f"?sign={sign}&rateType={rate_type}&contId={pid_str}&timestamp={timestamp}&salt={salt}"
         
-        resp = requests.get(base_url + params, headers=headers)
+        resp = get_with_retry(base_url + params, headers=headers)
         data = resp.json()
         
         if "body" in data and "urlInfo" in data["body"] and "url" in data["body"]["urlInfo"]:
             url = data["body"]["urlInfo"]["url"]
-            # 这里简化了加密过程，实际使用中需要实现完整的getddCalcuURL720p逻辑
-            return {"url": url, "rateType": 3}
-        return {"url": "", "rateType": 0}
+            print(f"成功获取链接: {url[:50]}...")
+            return {"url": url, "rateType": rate_type}
+        else:
+            print(f"API响应中未找到有效URL: {data}")
+            return {"url": "", "rateType": 0}
+            
     except Exception as e:
         print(f"获取Android 720p链接失败: {e}")
+        import traceback
+        traceback.print_exc()
         return {"url": "", "rateType": 0}
 
 # 回放数据处理
-async def get_playback_data(program_id):
+def get_playback_data(program_id):
     try:
         today = get_date_string(datetime.now())
         url = f"https://program-sc.miguvideo.com/live/v2/tv-programs-data/{program_id}/{today}"
-        resp = requests.get(url)
+        resp = get_with_retry(url)
         data = resp.json()
         return data.get("body", {}).get("program", [{}])[0].get("content", None)
     except Exception as e:
@@ -226,6 +260,21 @@ def update_playback_data(program, file_path):
         print(f"更新回放数据失败: {e}")
         return False
 
+def debug_data_source():
+    """调试函数，检查数据源问题"""
+    try:
+        datas = data_list()
+        for i, cate in enumerate(datas):
+            print(f"分类: {cate['name']}")
+            if 'dataList' in cate:
+                for j, program in enumerate(cate['dataList']):
+                    pid = program.get('pID')
+                    print(f"  节目 {j}: {program.get('name', '未知')} - PID: {pid} (类型: {type(pid)})")
+                    if pid is None:
+                        print(f"     警告: {program.get('name')} 的PID为None!")
+    except Exception as e:
+        print(f"调试数据源时出错: {e}")
+
 # 主函数
 def fetch_url_by_android():
     start = time.time()
@@ -236,7 +285,11 @@ def fetch_url_by_android():
         f.write("")
     
     # 获取数据
-    datas = data_list()
+    try:
+        datas = data_list()
+    except Exception as e:
+        print(f"获取数据失败: {e}")
+        return
     
     # 初始化回放文件
     playback_file = os.path.join(os.getcwd(), "playback.xml")
@@ -249,11 +302,26 @@ def fetch_url_by_android():
         f.write('#EXTM3U x-tvg-url="https://develop202.github.io/migu_video/playback.xml,https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/playback.xml,https://gh-proxy.com/https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/playback.xml" catchup="append" catchup-source="&playbackbegin=${(b)yyyyMMddHHmmss}&playbackend=${(e)yyyyMMddHHmmss}"\n')
     
     # 处理每个分类
+    success_count = 0
+    fail_count = 0
+    
     for i, cate in enumerate(datas):
-        print(f"分类###:{cate['name']}")
-        data = cate["dataList"]
+        print(f"处理分类: {cate['name']}")
+        data = cate.get("dataList", [])
         
         for program in data:
+            # 检查program数据完整性
+            if not program or 'pID' not in program or program['pID'] is None:
+                print(f"跳过无效节目数据: {program.get('name', '未知')}")
+                fail_count += 1
+                continue
+            
+            # 检查节目名称
+            if 'name' not in program or not program['name']:
+                print(f"跳过无名节目，PID: {program['pID']}")
+                fail_count += 1
+                continue
+            
             # 更新回放数据
             res = update_playback_data(program, playback_file)
             if not res:
@@ -263,22 +331,29 @@ def fetch_url_by_android():
             res_obj = get_android_url_720p(program["pID"])
             if res_obj["url"] == "":
                 print(f"{program['name']}：节目调整，暂不提供服务")
+                fail_count += 1
                 continue
             
-            print(f"正在写入节目:{program['name']}")
+            print(f"成功写入节目: {program['name']}")
             
             # 写入节目信息
             with open(path, "a", encoding="utf-8") as f:
                 line = f"#EXTINF:-1 svg-id=\"{program['name']}\" svg-name=\"{program['name']}\" tvg-logo=\"{program.get('pics', {}).get('highResolutionH', '')}\" group-title=\"{cate['name']}\",{program['name']}\n"
                 f.write(line)
                 f.write(f"{res_obj['url']}\n")
+            success_count += 1
     
     # 完成回放文件
     with open(playback_file, "a", encoding="utf-8") as f:
         f.write("</tv>\n")
     
     end = time.time()
+    print(f"处理完成: 成功 {success_count} 个, 失败 {fail_count} 个")
     print(f"本次耗时:{(end - start):.2f}秒")
 
 if __name__ == "__main__":
+    # 先调试数据源
+    print("开始调试数据源...")
+    debug_data_source()
+    print("\n开始获取播放链接...")
     fetch_url_by_android()
