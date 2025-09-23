@@ -1,0 +1,2 @@
+requests==2.31.0
+pywasm==0.1.0
