@@ -5,11 +5,9 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
-import pywasm
 import json
 
 # 配置
-WASM_URL = "https://m.miguvideo.com/mgs/player/prd/v_20250506111629_ddc2c612/dist/pickproof1000.wasm"
 CATE_LIST_URL = "https://program-sc.miguvideo.com/live/v2/tv-data/a5f78af9d160418eb679a6dd0429c920"
 PLAY_URL_TEMPLATE = "https://webapi.miguvideo.com/gateway/playurl/v2/play/playurlh5?contId={}&rateType={}&clientId=-&startPlay=true&xh265=false&channelId=0131_200300220100002"
 PLAYBACK_URL_TEMPLATE = "https://program-sc.miguvideo.com/live/v2/tv-programs-data/{}/{}"
@@ -35,38 +33,22 @@ def append_file(file_path, content):
     with open(file_path, 'a', encoding='utf-8') as f:
         f.write(content)
 
-def init_wasm(wasm_url):
-    try:
-        response = requests.get(wasm_url)
-        response.raise_for_status()
-        wasm_bytes = response.content
-        
-        # 保存到临时文件
-        with open("temp.wasm", "wb") as f:
-            f.write(wasm_bytes)
-            
-        # 加载WASM
-        vm = pywasm.load("temp.wasm")
-        return vm
-    except Exception as e:
-        print(f"WASM初始化失败: {str(e)}")
-        return None
+def init_wasm():
+    """
+    初始化WASM功能（简化版本，直接返回None）
+    由于pywasm兼容性问题，移除了实际WASM功能
+    """
+    print("WASM功能已禁用（兼容性原因）")
+    return None
 
 def get_encrypt_url(vm, url):
-    try:
-        # 假设WASM有一个encrypt函数，具体需要根据实际WASM接口调整
-        if not vm:
-            return url
-            
-        # 这里需要根据实际WASM导出函数调整
-        # 示例：将URL转换为字节数组传递给WASM函数
-        url_bytes = url.encode('utf-8')
-        result_ptr = vm.exec("encrypt", [len(url_bytes)])
-        # 实际应用中需要根据WASM逻辑处理返回值
-        return url
-    except Exception as e:
-        print(f"URL加密失败: {str(e)}")
-        return url
+    """
+    获取加密URL（简化版本，直接返回原始URL）
+    由于pywasm兼容性问题，移除了实际加密功能
+    """
+    # 在实际应用中，这里应该是WASM加密逻辑
+    # 现在直接返回原始URL
+    return url
 
 # 核心功能
 def get_cate_list():
@@ -193,8 +175,8 @@ def main():
     if datetime.now().hour == 0:
         refresh_token(user_id, migu_token)
     
-    # 初始化WASM
-    wasm_vm = init_wasm(WASM_URL)
+    # 初始化WASM（简化版本）
+    wasm_vm = init_wasm()
     
     # 获取分类和节目列表
     cate_list = get_cate_list()
@@ -256,7 +238,7 @@ def main():
                 print(f"无法获取 {program_name} 的播放链接")
                 continue
             
-            # 加密链接
+            # 加密链接（简化版本，直接使用原始URL）
             encrypted_url = get_encrypt_url(wasm_vm, res_obj['url'])
             
             # 写入M3U
